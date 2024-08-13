@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 typedef struct {
     int x;
@@ -91,6 +92,7 @@ Point scalarMultiply(Point P, int k, EllipticCurve curve) {
 }
 
 int main() {
+    clock_t start = clock();
     EllipticCurve curve = {2, 3, 97}; // y^2 = x^3 + 2x + 3 (mod 97)
     Point P = {3, 6};
     Point Q = {10, 7};
@@ -101,6 +103,9 @@ int main() {
     int k = 2;
     Point S = scalarMultiply(P, k, curve);
     printf("2P = (%d, %d)\n", S.x, S.y);
+
+    clock_t end = clock();
+    printf("소요 시간: %lf\n", (double)(end - start) / CLOCKS_PER_SEC);
 
     return 0;
 }
