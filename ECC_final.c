@@ -47,7 +47,22 @@ Point scalarMultiply(Point P, int k, EllipticCurve curve) {
 }
 
 // 헥사 문자열을 정수로 변환
-in수
+int hexToInt(const char* hex) {
+    int value;
+    sscanf_s(hex, "%x", &value); // 안전한 함수 사용
+    return value;
+}
+
+int main() {
+    clock_t start = clock();
+    EllipticCurve curve = { 2, 3, 97 }; // y^2 = x^3 + 2x + 3 (mod 97)
+
+    // 기본 점 G 설정 (예: G = (3, 6))
+    Point G = { 3, 6 };
+
+    // 개인키 입력
+    int privateKey;
+    printf("개인키를 입력하세요: ");
     scanf_s("%d", &privateKey);
 
     // 공개키 계산
