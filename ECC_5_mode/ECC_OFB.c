@@ -1,107 +1,115 @@
 #include <stdio.h>
-#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <stdint.h>
 
 typedef struct {
-    uint32_t x;
-    uint32_t y;
+    int x;
+    int y;
 } Point;
 
-#define P 0xFFFFFFFF // 소수
-#define A 0 // 타원 곡선 파라미터
-#define B 7 // 타원 곡선 파라미터
-#define AES_BLOCK_SIZE 16
+typedef struct {
+    int a;
+    int b;
+    int p; // 소수
+} EllipticCurve;
 
-// 타원 곡선 점 추가
-Point point_add(Point P1, Point P2) {
-    Point R;
-    if (P1.x == 0 && P1.y == 0) return P2; // P1이 무한대일 때
-    if (P2.x == 0 && P2.y == 0) return P1; // P2가 무한대일 때
+// 점 덧셈
+Point add(Point P, Point Q, EllipticCurve curve) {
+    if (P.x == 0 && P.y == 0) return Q;
+    if (Q.x == 0 && Q.y == 0) return P;
 
-    uint32_t m = (P2.y - P1.y) * mod_inverse(P2.x - P1.x, P) % P; // 기울기
+    int lambda = (Q.y - P.y) * modInverse(Q.x - P.x, curve.p) % curve.p;
+    int xR = (lambda * lambda - P.x - Q.x) % curve.p;
+    int yR = (lambda * (P.x - xR) - P.y) % curve.p;
 
-    R.x = (m * m - P1.x - P2.x) % P;
-    R.y = (m * (P1.x - R.x) - P1.y) % P;
-    return R;
+    return (Point) { (xR + curve.p) % curve.p, (yR + curve.p) % curve.p };
 }
 
 // 스칼라 곱셈
-Point scalar_multiply(Point P, uint32_t k) {
-    Point R = {0, 0}; // 무한대
-    Point Q = P;
-
-    while (k) {
-        if (k & 1) R = point_add(R, Q);
-        Q = point_add(Q, Q); // 점 두 배
-        k >>= 1;
+Point scalarMultiply(Point P, int k, EllipticCurve curve) {
+    Point R = { 0, 0 }; // 무한대 점
+    for (int i = 0; i < k; i++) {
+        R = add(R, P, curve);
     }
     return R;
 }
 
 // 모듈로 역수 계산
-uint32_t mod_inverse(uint32_t a, uint32_t p) {
-    uint32_t t = 0, new_t = 1;
-    uint32_t r = p, new_r = a;
-
-    while (new_r != 0) {
-        uint32_t quotient = r / new_r;
-        t = new_t;
-        new_t = t - quotient * new_t;
-        r = new_r;
-        new_r = r - quotient * new_r;
+int modInverse(int a, int p) {
+    a = a % p;
+    for (int x = 1; x < p; x++) {
+        if ((a * x) % p == 1) {
+            return x;
+        }
     }
-    if (r > 1) return 0; // 역수가 존재하지 않음
-    if (t < 0) t += p;
-
-    return t;
+    return 1; // 역수가 없는 경우
 }
 
-// AES 암호화 (간단한 XOR 대체)
-void aes_encrypt(const uint8_t *input, uint8_t *output, const uint8_t *key) {
-    for (int i = 0; i < AES_BLOCK_SIZE; i++) {
+// AES 암호화 (단순화된 형태)
+void simpleAesEncrypt(const uint8_t* input, uint8_t* output, const uint8_t* key) {
+    for (int i = 0; i < 16; i++) {
         output[i] = input[i] ^ key[i]; // XOR 연산으로 암호화
     }
 }
 
-// AES OFB 모드 암호화
-void aes_ofb_encrypt(const uint8_t *plaintext, uint8_t *ciphertext, const uint8_t *key, uint8_t *iv, size_t length) {
-    uint8_t block[AES_BLOCK_SIZE];
-    memcpy(block, iv, AES_BLOCK_SIZE);
+// OFB 모드 암호화
+void ofbEncrypt(const uint8_t* plaintext, uint8_t* ciphertext, const uint8_t* key, size_t length, uint8_t* iv) {
+    uint8_t outputBlock[16];
+    uint8_t feedback[16];
 
-    for (size_t i = 0; i < length; i++) {
-        uint8_t temp[AES_BLOCK_SIZE];
-        aes_encrypt(block, temp, key); // 현재 블록을 암호화
+    // 초기화 벡터를 피드백으로 사용
+    memcpy(feedback, iv, 16);
 
-        ciphertext[i] = plaintext[i] ^ temp[0]; // 평문과 암호화된 블록 XOR
+    for (size_t i = 0; i < length; i += 16) {
+        // 피드백 블록을 암호화
+        simpleAesEncrypt(feedback, outputBlock, key);
 
-        // 블록을 시프트
-        for (int j = 0; j < AES_BLOCK_SIZE - 1; j++) {
-            block[j] = block[j + 1];
+        // 평문 블록과 XOR 연산
+        for (size_t j = 0; j < 16 && (i + j) < length; j++) {
+            ciphertext[i + j] = plaintext[i + j] ^ outputBlock[j];
         }
-        block[AES_BLOCK_SIZE - 1] = ciphertext[i]; // 마지막 바이트에 암호문 업데이트
+
+        // 다음 피드백 블록을 위해 outputBlock을 피드백으로 설정
+        memcpy(feedback, outputBlock, 16);
     }
 }
 
-// 메인 함수
 int main() {
-    Point G = {1, 2}; // 타원 곡선 위의 점
-    uint32_t k = 3; // 개인 키
-    Point public_key = scalar_multiply(G, k); // 공개 키
+    clock_t start = clock();
+    EllipticCurve curve = { 2, 3, 97 }; // y^2 = x^3 + 2x + 3 (mod 97)
+    Point P = { 3, 6 };
+    Point Q = { 10, 7 };
 
-    // AES OFB 암호화
-    uint8_t key[AES_BLOCK_SIZE] = "1234567890123456"; // 16바이트 키
-    uint8_t plaintext[] = "Hello, World!!!"; // 16바이트 평문
+    Point R = add(P, Q, curve);
+    printf("P + Q = (%d, %d)\n", R.x, R.y);
+
+    int k = 2;
+    Point S = scalarMultiply(P, k, curve);
+    printf("2P = (%d, %d)\n", S.x, S.y);
+
+    // OFB 암호화 예제
+    uint8_t key[16] = "1234567890123456"; // 16바이트 키
+    uint8_t plaintext[] = "Hello, World!!!"; // 평문
+    size_t plaintextLength = sizeof(plaintext);
     uint8_t ciphertext[sizeof(plaintext)];
-    uint8_t iv[AES_BLOCK_SIZE] = "0000000000000000"; // 초기화 벡터
 
-    aes_ofb_encrypt(plaintext, ciphertext, key, iv, sizeof(plaintext));
+    // 초기화 벡터
+    uint8_t iv[16] = "initialvector!!"; // 16바이트 IV
 
-    printf("Public Key: (%u, %u)\n", public_key.x, public_key.y);
+    // OFB 모드 사용하여 암호화
+    ofbEncrypt(plaintext, ciphertext, key, plaintextLength, iv);
+
     printf("Ciphertext: ");
-    for (size_t i = 0; i < sizeof(ciphertext); i++) {
+    for (size_t i = 0; i < plaintextLength; i++) {
         printf("%02x", ciphertext[i]);
     }
     printf("\n");
 
+    clock_t end = clock();
+    printf("소요 시간: %lf\n", (double)(end - start) / CLOCKS_PER_SEC);
+
     return 0;
 }
+
